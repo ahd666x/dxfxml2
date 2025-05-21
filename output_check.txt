@@ -1,0 +1,33 @@
+File listing:
+-rw-rw-rw- 1 codespace codespace  901 May 20 20:36 1/1.534x80.8.xml
+-rw-rw-rw- 1 codespace codespace 1915 May 20 20:36 1/1.550x230.3.xml
+-rw-rw-rw- 1 codespace codespace 1693 May 20 20:36 1/1.550x230.4.xml
+-rw-rw-rw- 1 codespace codespace 3713 May 20 20:36 1/1.808x230.2.xml
+-rw-rw-rw- 1 codespace codespace 4785 May 20 20:35 1/1.808x426.1.xml
+-rw-rw-rw- 1 codespace codespace 1200 May 20 20:36 1/1.808x426.5.xml
+-rw-rw-rw- 1 codespace codespace 1460 May 20 20:36 1/1.840x230.7.xml
+-rw-rw-rw- 1 codespace codespace  909 May 20 20:36 1/1.872x262.6.xml
+\nFile contents:
+<?xml version="1.0" encoding="utf-8"?>
+<Root Cad="BuiltInCad" version="2.0">
+  <Project>
+    <Panels>
+      <Panel IsProduce="true" ID="1.534x80.8" Name="1.534x80.8" Length="534" Width="80" Thickness="16" MachiningPoint="1">
+        <Outline>
+          <Point X="534" Y="80"/>
+          <Point X="0" Y="80"/>
+          <Point X="0" Y="0"/>
+          <Point X="534" Y="0"/>
+          <Point X="534" Y="80"/>
+        </Outline>
+        <Machines/>
+        <EdgeGroup X1="0" Y1="0">
+          <Edge Face="2" Thickness="0" Pre_Milling="0" X="0" Y="0" CentralAngle="0"/>
+          <Edge Face="1" Thickness="0" Pre_Milling="0" X="534" Y="0" CentralAngle="0"/>
+          <Edge Face="4" Thickness="0" Pre_Milling="0" X="534" Y="80" CentralAngle="0"/>
+          <Edge Face="3" Thickness="0" Pre_Milling="0" X="0" Y="80" CentralAngle="0"/>
+        </EdgeGroup>
+      </Panel>
+    </Panels>
+  </Project>
+</Root>

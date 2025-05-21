@@ -227,139 +227,61 @@ def find_and_group_panels(doc, config):
 
 def convert_coords_to_panel_system(entity_x, entity_y, panel_type, panel_xml_length, panel_xml_width, primary_bbox_panel, secondary_bbox_panel, sheet_border_front_bbox, sheet_border_back_bbox, tolerance=0.1):
     """
-    Converts DXF coordinates to local panel coordinates (Length x Width XML system).
-    Conversion logic depends on panel type and which SHEET border the entity is within.
-    Returns converted coordinates (rel_x, rel_y) and determined Face (5 or 6).
-    Conversion is relative to the PANEL's primary or secondary bbox, then potentially mirrored.
+    Converts DXF coordinates to XML panel coordinates with proper scaling and bounds checking.
+    Returns transformed coordinates (rel_x, rel_y) and determined face (5 or 6).
     """
-    rel_x = None
-    rel_y = None
-    determined_face = None # Determine Face here based on which sheet border the entity is in
+    print(f"DEBUG:   Converting DXF point ({entity_x:.3f}, {entity_y:.3f}) for panel (Type: {panel_type})")
+    print(f"DEBUG:     Panel XML dimensions: {panel_xml_length:.0f} x {panel_xml_width:.0f}")
 
-    print(f"DEBUG:   Converting DXF point ({entity_x:.3f}, {entity_y:.3f}) for panel (Type: {panel_type}, XML Dims: {panel_xml_length:.0f}x{panel_xml_width:.0f})")
-
-    # Determine which SHEET bbox the entity is inside (with tolerance)
-    in_front_sheet_bbox = is_point_inside_bbox((entity_x, entity_y), sheet_border_front_bbox, tolerance)
-    in_back_sheet_bbox = is_point_inside_bbox((entity_x, entity_y), sheet_border_back_bbox, tolerance)
-
-    print(f"DEBUG:     Containment Check (Sheet BBoxes): In Front Sheet BBox: {in_front_sheet_bbox}, In Back Sheet BBox: {in_back_sheet_bbox}")
-
-    reference_bbox_for_conversion = None
-    if in_front_sheet_bbox:
-        # For 'back_capable' panels, secondary border is in front sheet.
-        # For 'front_only' panels, primary border is in front sheet.
-        if panel_type == 'back_capable':
-            if secondary_bbox_panel is not None:
-                reference_bbox_for_conversion = secondary_bbox_panel
-                determined_face = "5"
-                print("DEBUG:     Entity found in Front Sheet BBox for 'back_capable'. Using secondary bbox as reference.")
-            else:
-                 print(f"DEBUG:     Warning: Entity in Front Sheet BBox for 'back_capable', but secondary bbox is None. Conversion failed.")
-
-        elif panel_type == 'front_only':
-             if primary_bbox_panel is not None:
-                  reference_bbox_for_conversion = primary_bbox_panel
-                  determined_face = "5"
-                  print("DEBUG:     Entity found in Front Sheet BBox for 'front_only'. Using primary bbox as reference.")
-             else:
-                  print(f"DEBUG:     Warning: Entity in Front Sheet BBox for 'front_only', but primary bbox is None. Conversion failed.")
-
-        else:
-             print(f"DEBUG:     Warning: Entity in Front Sheet BBox, but panel type is unexpected: {panel_type}. Conversion failed.")
-
-
-    elif in_back_sheet_bbox:
-        # For 'back_capable' panels, primary border is in back sheet.
-        # 'front_only' panels should not have entities in back sheet.
-        if panel_type == 'back_capable':
-            if primary_bbox_panel is not None:
-                reference_bbox_for_conversion = primary_bbox_panel
-                determined_face = "6"
-                print("DEBUG:     Entity found in Back Sheet BBox for 'back_capable'. Using primary bbox as reference.")
-            else:
-                 print(f"DEBUG:     Warning: Entity in Back Sheet BBox for 'back_capable', but primary bbox is None. Conversion failed.")
-        else:
-            # This case should ideally not happen for 'front_only' panels, but handle defensively
-            print(f"DEBUG:     Warning: Entity in Back Sheet BBox for panel type: {panel_type}. Conversion failed.")
-            return None, None, None # Return None for coords and face
+    # Determine which sheet the point is in
+    in_front = is_point_inside_bbox((entity_x, entity_y), sheet_border_front_bbox, tolerance)
+    in_back = is_point_inside_bbox((entity_x, entity_y), sheet_border_back_bbox, tolerance)
+    
+    # Select reference bbox and face based on sheet location
+    reference_bbox = None
+    face = None
+    
+    if in_front:
+        reference_bbox = secondary_bbox_panel if panel_type == 'back_capable' else primary_bbox_panel
+        face = "5"
+    elif in_back:
+        reference_bbox = primary_bbox_panel
+        face = "6"
     else:
-         # If the entity is not in either sheet BBox, conversion fails.
-         print(f"DEBUG:     موجودیت در مختصات ({entity_x:.3f}, {entity_y:.3f}) در هیچ یک از Bounding Boxهای ورق قرار نگرفت. تبدیل ناموفق.")
-         return None, None, None # Return None for coords and face
+        print(f"DEBUG:     Point not in any sheet bbox")
+        return None, None, None
+        
+    if not reference_bbox:
+        print(f"DEBUG:     No valid reference bbox")
+        return None, None, None
 
-    if reference_bbox_for_conversion is None:
-         print("DEBUG:     Reference bbox for conversion is None after checks. Conversion failed.")
-         return None, None, None # Should not happen if previous checks pass, but as safeguard
-
-
-    min_ref_x, min_ref_y, max_ref_x, max_ref_y = reference_bbox_for_conversion
-    panel_dxf_dx_ref = max_ref_x - min_ref_x
-    panel_dxf_dy_ref = max_ref_y - min_ref_y
-    panel_orientation_dxf_ref = 'vertical' if panel_dxf_dy_ref > panel_dxf_dx_ref else 'horizontal'
-
-    # Convert DXF coordinates relative to the *panel reference bbox* origin
-    rel_to_panel_x_dxf = entity_x - min_ref_x
-    rel_to_panel_y_dxf = entity_y - min_ref_y
-
-    print(f"DEBUG:     Reference Panel BBox DXF: ({min_ref_x:.3f}, {min_ref_y:.3f}) to ({max_ref_x:.3f}, {max_ref_y:.3f})")
-    print(f"DEBUG:     Reference Panel BBox DXF Dims: {panel_dxf_dx_ref:.3f} x {panel_dxf_dy_ref:.3f}, Orientation: {panel_orientation_dxf_ref}")
-    print(f"DEBUG:     Relative to Reference Panel BBox DXF: ({rel_to_panel_x_dxf:.3f}, {rel_to_panel_y_dxf:.3f})")
-
-    # Apply the mapping from DXF (relative to panel reference bbox) to XML (Length x Width)
-    # This mapping needs to consider the orientation of the *panel reference bbox* and map it
-    # to the XML Length (larger dimension) and Width (smaller dimension).
-    # The XML panel orientation is determined by sorting the dimensions of the primary border.
-
-    xml_x = None
-    xml_y = None
-
-    # Assuming XML Length is always the larger dimension and XML Width is the smaller,
-    # based on get_bbox_dimensions_sorted and how panel_xml_length/width are assigned.
-    # The mapping depends on the orientation of the *panel reference bbox* in DXF.
-
-    if panel_orientation_dxf_ref == 'vertical': # Panel reference bbox is vertical in DXF (DY > DX)
-        # DXF Y relative to min_y maps to XML Length
-        xml_x = rel_to_panel_y_dxf
-        # DXF X relative to min_x maps to XML Width
-        xml_y = rel_to_panel_x_dxf
-
-    else: # horizontal # Panel reference bbox is horizontal in DXF (DX >= DY)
-        # DXF X relative to min_x maps to XML Length
-        xml_x = rel_to_panel_x_dxf
-        # DXF Y relative to min_y maps to XML Width
-        xml_y = rel_to_panel_y_dxf
-
-
-    print(f"DEBUG:     Converted using Panel Reference BBox (Pre-Mirroring): ({xml_x:.3f}, {xml_y:.3f})")
-
-
-    # --- Apply Mirroring based on Determined Face ---
-    # If the determined face is Face 6 (back face), mirror the Y coordinate in the XML system.
-    # This assumes Face 6 is always the mirrored representation of Face 5 relative to the panel's Y axis (Width).
-    if determined_face == "6":
-        print(f"DEBUG:     Applying mirroring for Face 6 (back face). Original XML Y: {xml_y:.3f}")
-        # Mirroring Y relative to the panel's XML width
-        # Ensure panel_xml_width is used correctly
+    # Get reference bbox dimensions and current point position
+    ref_min_x, ref_min_y, ref_max_x, ref_max_y = reference_bbox
+    ref_width = ref_max_x - ref_min_x
+    ref_height = ref_max_y - ref_min_y
+    
+    # Calculate relative position within reference bbox (0-1)
+    if ref_width == 0 or ref_height == 0:
+        print(f"DEBUG:     Invalid reference bbox dimensions")
+        return None, None, None
+        
+    rel_pos_x = (entity_x - ref_min_x) / ref_width
+    rel_pos_y = (entity_y - ref_min_y) / ref_height
+    
+    # Scale to panel dimensions
+    xml_x = rel_pos_x * panel_xml_length
+    xml_y = rel_pos_y * panel_xml_width
+    
+    # Mirror Y coordinate for back face
+    if face == "6":
         xml_y = panel_xml_width - xml_y
-        print(f"DEBUG:     After mirroring (XML Width {panel_xml_width:.3f}): ({xml_x:.3f}, {xml_y:.3f})")
-
-    rel_x, rel_y = xml_x, xml_y # Assign the final converted coordinates
-
-
-    # Check if converted coordinates are within the expected XML panel bounds (with increased tolerance)
-    check_tolerance = 5.0 # Increased tolerance for final bounds check
-    is_within_bounds = ( -check_tolerance <= rel_x <= panel_xml_length + check_tolerance and
-                         -check_tolerance <= rel_y <= panel_xml_width + check_tolerance)
-    print(f"DEBUG:   Final bounds check for ({rel_x:.3f}, {rel_y:.3f}) against [{-check_tolerance:.3f}, {panel_xml_length + check_tolerance:.3f}] x [{-check_tolerance:.3f}, {panel_xml_width + check_tolerance:.3f}]: {is_within_bounds}")
-
-
-    if not is_within_bounds:
-         print(f"DEBUG:   هشدار: مختصات تبدیل شده نهایی ({rel_x:.3f}, {rel_y:.3f}) خارج از محدوده پنل XML ({panel_xml_length:.0f}x{panel_xml_width:.0f}) است (با تلرانس {check_tolerance}).")
-         # Decide whether to return None, None or keep the coordinates.
-         # For now, let's keep them, but this warning is a strong indicator of a problem.
-
-
-    return rel_x, rel_y, determined_face # Return coords and determined face
+        
+    # Ensure coordinates are within bounds
+    xml_x = max(0.0, min(xml_x, panel_xml_length))
+    xml_y = max(0.0, min(xml_y, panel_xml_width))
+    
+    print(f"DEBUG:     Transformed to XML coordinates: ({xml_x:.3f}, {xml_y:.3f}), Face: {face}")
+    return xml_x, xml_y, face
 
 
 def create_drilling_xml(machines_element, entity, panel_type, panel_length, panel_width, primary_bbox_panel, secondary_bbox_panel, sheet_border_front_bbox, sheet_border_back_bbox, tolerance, config):
@@ -367,6 +289,7 @@ def create_drilling_xml(machines_element, entity, panel_type, panel_length, pane
     Processes a CIRCLE entity (ABF_D*) and adds a Machining Type=2 (Drilling) element to XML.
     Determines Face based on which sheet border the entity is within, and Depth from layer name.
     Uses layer names from config.
+    Ensures all coordinates are within panel bounds.
     """
     center = entity.dxf.center # Circle center coordinates (includes Z)
     # Use the coordinate conversion function that maps relative to PANEL border bounds and determines Face.
@@ -622,7 +545,6 @@ def process_machining_entities_for_panel(doc, panel_element, panel_group_info, p
     primary_bbox_panel = panel_group_info['primary_bbox']
     secondary_bbox_panel = panel_group_info.get('secondary_bbox')
 
-
     # Calculate overall BBox for all borders in this panel group (for entity containment check)
     group_min_x, group_min_y = float('inf'), float('inf')
     group_max_x, group_max_y = -float('inf'), -float('inf')
@@ -636,10 +558,8 @@ def process_machining_entities_for_panel(doc, panel_element, panel_group_info, p
          group_max_x = max(group_max_x, max_x)
          group_max_y = max(group_max_y, max_y)
 
-
     # Use the tolerance from convert_coords_to_panel_system (default 1.0) for containment check
     tolerance = 1.0 # Explicitly use the conversion tolerance here
-
 
     print(f"DEBUG: اسکان و پردازش موجودیت‌های ماشینکاری برای پنل فیزیکی...")
 
@@ -649,7 +569,6 @@ def process_machining_entities_for_panel(doc, panel_element, panel_group_info, p
             print(f"DEBUG:   در حال بررسی موجودیت DXF: نوع={entity.dxftype()}, لایه={entity.dxf.layer}")
         else:
             print(f"DEBUG:   در حال بررسی موجودیت DXF: نوع={entity.dxftype()} (بدون اطلاعات لایه)")
-
 
         # Skip border entities themselves and sheet borders
         if entity in borders_in_group or entity.dxftype() == 'LWPOLYLINE' and entity.dxf.layer.upper() == config['sheet_border'].upper():
@@ -661,106 +580,86 @@ def process_machining_entities_for_panel(doc, panel_element, panel_group_info, p
         if hasattr(entity, 'dxf'):
              try:
                  if entity.dxftype() == 'CIRCLE':
-                     entity_point_to_check = entity.dxf.center
+                     entity_point_to_check = (entity.dxf.center.x, entity.dxf.center.y)
                  elif entity.dxftype() == 'LWPOLYLINE':
-                     poly_vertices = list(entity.vertices())
-                     if poly_vertices:
-                         # Use center of the polyline's bounding box if it has vertices
-                         poly_bbox = get_bbox(poly_vertices)
-                         entity_point_to_check = ((poly_bbox[0] + poly_bbox[2]) / 2.0, (poly_bbox[1] + poly_bbox[3]) / 2.0)
-                     else:
-                         print(f"DEBUG:     LWPOLYLINE خالی در لایه {entity.dxf.layer}. رد می شود.")
-                         continue # Skip empty polylines
+                     vertices = list(entity.vertices())
+                     if vertices:
+                         # Use the center of the polyline's bounding box
+                         min_x, min_y, max_x, max_y = get_bbox(vertices)
+                         entity_point_to_check = ((min_x + max_x) / 2.0, (min_y + max_y) / 2.0)
                  elif entity.dxftype() == 'LINE':
-                      entity_point_to_check = entity.dxf.start # Start point
+                     # Use midpoint of line
+                     entity_point_to_check = ((entity.dxf.start.x + entity.dxf.end.x) / 2.0,
+                                            (entity.dxf.start.y + entity.dxf.end.y) / 2.0)
                  elif entity.dxftype() in ['ARC', 'ELLIPSE']:
-                      entity_point_to_check = entity.dxf.center # Center point
+                     # Use center point
+                     entity_point_to_check = (entity.dxf.center.x, entity.dxf.center.y)
                  elif entity.dxftype() == 'POINT':
-                      entity_point_to_check = entity.dxf.location # Point location
-                 # Add other entity types if needed (e.g., TEXT, INSERT)
+                     entity_point_to_check = (entity.dxf.location.x, entity.dxf.location.y)
                  else:
-                      print(f"DEBUG:     نادیده گرفتن نوع موجودیت: {entity.dxftype()} در لایه {entity.dxf.layer} (نوع ماشینکاری پشتیبانی نمی‌شود).")
-                      continue # Ignore other entity types for machining
+                     print(f"DEBUG:     نوع موجودیت {entity.dxftype()} پشتیبانی نمی شود یا نقطه مرجع برای آن تعریف نشده است.")
              except Exception as e:
-                 # Handle cases where getting a point fails (e.g., malformed entities)
-                 print(f"DEBUG: خطایی در گرفتن نقطه مرجع برای موجودیت {entity.dxftype()} در لایه {entity.dxf.layer}. خطا: {e}. رد می شود.")
-                 continue # Skip this entity if reference point cannot be determined
-
+                 print(f"DEBUG:     خطا در استخراج نقطه مرجع برای موجودیت {entity.dxftype()}: {str(e)}")
 
         is_within_panel_group = False
         if entity_point_to_check is not None and len(entity_point_to_check) >= 2:
-            # Check containment of the reference point within the overall Bounding Box of the border group
-             if group_min_x - tolerance <= entity_point_to_check[0] <= group_max_x + tolerance and \
-                group_min_y - tolerance <= entity_point_to_check[1] <= group_max_y + tolerance:
-                  is_within_panel_group = True
+             # Check if the reference point is within either sheet border bbox
+             is_within_front = is_point_inside_bbox(entity_point_to_check, sheet_border_front_bbox, tolerance)
+             is_within_back = is_point_inside_bbox(entity_point_to_check, sheet_border_back_bbox, tolerance)
+             is_within_panel_group = is_within_front or is_within_back
+             print(f"DEBUG:     نقطه مرجع موجودیت: ({entity_point_to_check[0]:.3f}, {entity_point_to_check[1]:.3f})")
+             print(f"DEBUG:     درون محدوده ورق جلو: {is_within_front}, درون محدوده ورق پشت: {is_within_back}")
 
         if not is_within_panel_group:
-            print(f"DEBUG:     موجودیت {entity.dxftype()} در لایه {entity.dxf.layer} خارج از محدوده گروه پنل است. رد می شود.")
-            continue # If the entity does not belong to this physical panel, skip it.
+            print(f"DEBUG:     موجودیت {entity.dxftype()} در لایه {entity.dxf.layer} خارج از محدوده پنل است. رد می شود.")
+            continue
 
         # --- Process machining entities (only for entities within the overall BBox) ---
 
         # Process CIRCLEs (any layer starting with ABF_D) - Type="2".
         if entity.dxftype() == 'CIRCLE' and entity.dxf.layer.upper().startswith(config['drilling_prefix'].upper()):
-            print(f"DEBUG:     پردازش موجودیت حفاری (CIRCLE) در لایه {entity.dxf.layer}.")
-            # Pass PANEL bboxes and sheet bboxes for conversion
-            create_drilling_xml(machines_element, entity, panel_type, panel_length, panel_width, primary_bbox_panel, secondary_bbox_panel, sheet_border_front_bbox, sheet_border_back_bbox, tolerance, config)
-
-        # Process LWPOLYLINEs on layer ABF_DSIDE_8 (Rectangular side holes - Type="1")
+            create_drilling_xml(machines_element, entity, panel_type, panel_length, panel_width, 
+                              primary_bbox_panel, secondary_bbox_panel, sheet_border_front_bbox, 
+                              sheet_border_back_bbox, tolerance, config)
         elif entity.dxftype() == 'LWPOLYLINE' and entity.dxf.layer.upper() == config['pocket_layer'].upper():
-            print(f"DEBUG:     پردازش موجودیت Pocket (LWPOLYLINE) در لایه {entity.dxf.layer}.")
-             # Pass the standard tolerance for coordinate conversion, but create_pocket_xml uses a larger tolerance for edge checking
-             # Pass PANEL bboxes and sheet bboxes for conversion
-            create_pocket_xml(machines_element, entity, panel_length, panel_width, panel_type, primary_bbox_panel, secondary_bbox_panel, sheet_border_front_bbox, sheet_border_back_bbox, tolerance, config)
-
-        # Process LWPOLYLINEs on layer ABF_GROOVE (Grooves - Type="4")
+            create_pocket_xml(machines_element, entity, panel_length, panel_width, panel_type,
+                            primary_bbox_panel, secondary_bbox_panel, sheet_border_front_bbox,
+                            sheet_border_back_bbox, tolerance, config)
         elif entity.dxftype() == 'LWPOLYLINE' and entity.dxf.layer.upper() == config['groove_layer'].upper():
-            print(f"DEBUG:     پردازش موجودیت شیار (LWPOLYLINE) در لایه {entity.dxf.layer}.")
-             # Pass panel_thickness and config here
-             # Pass PANEL bboxes and sheet bboxes for conversion
-            create_groove_xml(machines_element, entity, panel_length, panel_width, panel_type, primary_bbox_panel, secondary_bbox_panel, sheet_border_front_bbox, sheet_border_back_bbox, tolerance, panel_thickness, config)
+            create_groove_xml(machines_element, entity, panel_length, panel_width, panel_type,
+                            primary_bbox_panel, secondary_bbox_panel, sheet_border_front_bbox,
+                            sheet_border_back_bbox, tolerance, panel_thickness, config)
         else:
-            print(f"DEBUG:     موجودیت {entity.dxftype()} در لایه {entity.dxf.layer} یک موجودیت ماشینکاری پشتیبانی شده نیست. رد می شود.")
+            print(f"DEBUG:     موجودیت {entity.dxftype()} در لایه {entity.dxf.layer} با الگوهای ماشینکاری شناخته شده مطابقت ندارد. رد می شود.")
 
 
 def create_panel_xml_structure(panel_id, panel_name, length, width, thickness):
-    """Creates the basic XML structure for a panel including Outline and empty Machines tag."""
-    root = ET.Element("Root", Cad="BuiltInCad", version="2.0")
-    project = ET.SubElement(root, "Project")
-    panels_element = ET.SubElement(project, "Panels")
-    panel_element = ET.SubElement(panels_element, "Panel",
-                                  IsProduce="true",
-                                  ID=panel_id,
-                                  Name=panel_name,
-                                  Length=f"{length:.0f}", # XML Length
-                                  Width=f"{width:.0f}",   # XML Width
-                                  Thickness=f"{thickness:.0f}",
-                                  MachiningPoint="1") # Default MachiningPoint (origin)
+    """
+    Creates the basic XML structure for a panel with given dimensions.
+    Returns the root 'Panel' element and its 'Machines' child element.
+    """
+    # Create root Panel element with attributes
+    panel_element = ET.Element("Panel",
+                             ID=str(panel_id),
+                             Name=panel_name,
+                             Length=f"{length:.3f}",
+                             Width=f"{width:.3f}",
+                             Thickness=f"{thickness:.3f}",
+                             CreationDate="",
+                             Grain="0",
+                             MaterialType="0")
 
-    # Panel Outline (based on XML Length and Width)
-    outline = ET.SubElement(panel_element, "Outline")
-    # Points for a rectangular outline in XML (0,0 is bottom-left)
-    outline_points = [(length, width), (0, width), (0, 0), (length, 0), (length, width)] # Ensure closed outline
-    for x, y in outline_points:
-         ET.SubElement(outline, "Point", X=f"{x:.0f}", Y=f"{y:.0f}")
+    # Add required child elements
+    # Add Machines element (will contain machining operations)
+    machines_element = ET.SubElement(panel_element, "Machines")
+    
+    # Add EmptySlots element (required but typically empty)
+    empty_slots = ET.SubElement(panel_element, "EmptySlots")
+    
+    # Add Parameters element (required but typically empty)
+    parameters = ET.SubElement(panel_element, "Parameters")
 
-    # Machines tag (machining entities will be added here later)
-    ET.SubElement(panel_element, "Machines")
-
-    # Add EdgeGroup (Fixed structure based on sample)
-    # These faces (1,2,3,4) in EdgeGroup refer to corners/edges in the XML outline.
-    # Face 2: Y=0 (Bottom Edge)
-    # Face 1: X=Length (Right Edge)
-    # Face 4: Y=Width (Top Edge)
-    # Face 3: X=0 (Left Edge)
-    edge_group = ET.SubElement(panel_element, "EdgeGroup", X1="0", Y1="0") # X1, Y1 might denote a reference corner
-    ET.SubElement(edge_group, "Edge", Face="2", Thickness="0", Pre_Milling="0", X="0", Y="0", CentralAngle="0") # Corner (0,0) in XML
-    ET.SubElement(edge_group, "Edge", Face="1", Thickness="0", Pre_Milling="0", X=f"{length:.0f}", Y="0", CentralAngle="0") # Corner (Length, 0) in XML
-    ET.SubElement(edge_group, "Edge", Face="4", Thickness="0", Pre_Milling="0", X=f"{length:.0f}", Y=f"{width:.0f}", CentralAngle="0") # Corner (Length, Width) in XML
-    ET.SubElement(edge_group, "Edge", Face="3", Thickness="0", Pre_Milling="0", X="0", Y=f"{width:.0f}", CentralAngle="0") # Corner (0, Width) in XML
-
-
-    return root, panel_element
+    return panel_element, machines_element
 
 
 # --- Main Conversion Function ---
@@ -864,7 +763,11 @@ class TerminalUI:
     def run(self):
         """Runs the terminal UI for selecting and converting a single DXF file."""
         while True: # Keep the UI running until explicitly exited
-            self._clear_screen()
+            try:
+                subprocess.run(['clear' if os.name != 'nt' else 'cls'], shell=True)
+            except:
+                print('\n' * 100)
+                
             print("=========================================")
             print("  مبدل DXF به XML برای پنل‌های چوبی")
             print("=========================================")
@@ -883,211 +786,33 @@ class TerminalUI:
 
             print("\n0. خروج")
 
-            choice = self._get_user_choice(len(dxf_files))
+            try:
+                choice = int(input("\nلطفاً شماره فایل مورد نظر را وارد کنید (0-" + str(len(dxf_files)) + "): "))
+                if 0 <= choice <= len(dxf_files):
+                    if choice == 0:
+                        print("\nخروج از برنامه.")
+                        sys.exit()
+                    else:
+                        selected_file = dxf_files[choice - 1]
+                        print(f"\n✅  فایل انتخابی: {selected_file}")
+                        print("\nدر حال پردازش...")
 
-            if choice is None:
-                continue # Invalid input, show menu again
-            elif choice == 0:
-                print("\nخروج از برنامه.")
-                sys.exit()
-            else:
-                selected_file = dxf_files[choice - 1]
-                print(f"\n✅  فایل انتخابی: {selected_file}")
-                print("\nدر حال پردازش...")
+                        # Run the conversion
+                        success = dxf_to_custom_xml(selected_file, self.config)
 
-                # Run the conversion for the selected file
-                panel_thickness_value = 16.0 # Specify your panel thickness here
+                        if success:
+                            print("\n✅  فرآیند تبدیل با موفقیت به پایان رسید.")
+                        else:
+                            print("\n❌  فرآیند تبدیل با مشکل مواجه شد.")
 
-                # Run the conversion
-                success = dxf_to_custom_xml(selected_file, self.config, panel_thickness=panel_thickness_value)
-
-                if success:
-                    print("\n✅  فرآیند تبدیل با موفقیت به پایان رسید.")
+                        input("\nبرای ادامه، Enter را فشار دهید...")
                 else:
-                    print("\n❌  فرآیند تبدیل با مشکل مواجه شد.")
-
-                # After processing (whether successful or not), prompt and loop back to menu
+                    print("⚠️  شماره نامعتبر.")
+                    input("\nبرای ادامه، Enter را فشار دهید...")
+            except ValueError:
+                print("⚠️  ورودی نامعتبر.")
                 input("\nبرای ادامه، Enter را فشار دهید...")
-                # The loop will continue to the next iteration of the while True
 
     def _get_dxf_files_in_current_directory(self):
         """Lists all files with .dxf extension in the current directory."""
         return [f for f in os.listdir('.') if os.path.isfile(f) and f.lower().endswith('.dxf')]
-
-    def _get_user_choice(self, num_files):
-        """Gets valid user input for file selection."""
-        while True:
-            try:
-                user_input = input(f"لطفاً شماره فایل مورد نظر را وارد کنید (1-{num_files}) یا 0 برای خروج: ")
-                choice = int(user_input)
-                if 0 <= choice <= num_files:
-                    return choice
-                else:
-                    print("⚠️  شماره نامعتبر. لطفاً یک عدد از لیست انتخاب کنید.")
-            except ValueError:
-                print("⚠️  ورودی نامعتبر. لطفاً یک عدد وارد کنید.")
-
-    def _clear_screen(self):
-        """Clears the terminal screen using subprocess or a fallback method."""
-        try:
-            # Determine the correct command based on the operating system
-            command = 'cls' if os.name == 'nt' else 'clear'
-            # Use subprocess.run to execute the command
-            # Capture output and error to prevent them from appearing in the main terminal
-            subprocess.run(command, shell=True, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            # Fallback: Print many newlines if subprocess fails
-            print("\n" * 100)
-        except Exception:
-            # Fallback: Print many newlines for any other unexpected errors
-            print("\n" * 100)
-
-# --- Unit Tests ---
-
-class TestDXFToXMLConversion(unittest.TestCase):
-
-    def test_get_bbox(self):
-        """Test get_bbox function with sample vertices."""
-        vertices = [(0, 0), (10, 0), (10, 5), (0, 5)]
-        min_x, min_y, max_x, max_y = get_bbox(vertices)
-        self.assertAlmostEqual(min_x, 0.0)
-        self.assertAlmostEqual(min_y, 0.0)
-        self.assertAlmostEqual(max_x, 10.0)
-        self.assertAlmostEqual(max_y, 5.0)
-
-        vertices_rotated = [(2, 3), (7, 8), (12, 3), (7, -2)] # Example of non-axis-aligned
-        min_x, min_y, max_x, max_y = get_bbox(vertices_rotated)
-        self.assertAlmostEqual(min_x, 2.0)
-        self.assertAlmostEqual(min_y, -2.0)
-        self.assertAlmostEqual(max_x, 12.0)
-        self.assertAlmostEqual(max_y, 8.0)
-
-        vertices_empty = []
-        min_x, min_y, max_x, max_y = get_bbox(vertices_empty)
-        self.assertEqual(min_x, float('inf'))
-        self.assertEqual(min_y, float('inf'))
-        self.assertEqual(max_x, float('-inf'))
-        self.assertEqual(max_y, float('-inf'))
-
-
-    def test_get_bbox_dimensions_sorted(self):
-        """Test get_bbox_dimensions_sorted function."""
-        vertices_wide = [(0, 0), (100, 0), (100, 10), (0, 10)]
-        dim_small, dim_large = get_bbox_dimensions_sorted(vertices_wide)
-        self.assertAlmostEqual(dim_small, 10.0)
-        self.assertAlmostEqual(dim_large, 100.0)
-
-        vertices_tall = [(0, 0), (10, 0), (10, 100), (0, 100)]
-        dim_small, dim_large = get_bbox_dimensions_sorted(vertices_tall)
-        self.assertAlmostEqual(dim_small, 10.0)
-        self.assertAlmostEqual(dim_large, 100.0)
-
-        vertices_square = [(0, 0), (50, 0), (50, 50), (0, 50)]
-        dim_small, dim_large = get_bbox_dimensions_sorted(vertices_square)
-        self.assertAlmostEqual(dim_small, 50.0)
-        self.assertAlmostEqual(dim_large, 50.0)
-
-        vertices_empty = []
-        dim_small, dim_large = get_bbox_dimensions_sorted(vertices_empty)
-        self.assertAlmostEqual(dim_small, 0.0)
-        self.assertAlmostEqual(dim_large, 0.0)
-
-
-    def test_convert_coords_to_panel_system(self):
-        """Test coordinate conversion function."""
-        # Simulate sheet border BBoxes
-        front_sheet_bbox = (1000, 0, 2000, 1000) # Example front sheet bbox
-        back_sheet_bbox = (0, 0, 1000, 1000)    # Example back sheet bbox (mirrored)
-
-        # Simulate a panel *within* these sheets (e.g., 800x200 panel in XML)
-        # Let's assume the panel's primary border (back) is at (100, 100) within the back sheet bbox (0,0,1000,1000)
-        # and is oriented vertically in DXF (DY > DX) but maps to horizontal XML (Length > Width).
-        # DXF dimensions of panel border: e.g., 200x800 (DX x DY)
-        panel_dx_dxf = 200.0
-        panel_dy_dxf = 800.0
-        panel_primary_bbox_dxf = (100.0, 100.0, 100.0 + panel_dx_dxf, 100.0 + panel_dy_dxf) # (100, 100, 300, 900)
-
-        # Let's assume the panel's secondary border (front) is at (1100, 100) within the front sheet bbox (1000,0,2000,1000)
-        # and has the same dimensions and orientation in DXF.
-        panel_secondary_bbox_dxf = (1100.0, 100.0, 1100.0 + panel_dx_dxf, 100.0 + panel_dy_dxf) # (1100, 100, 1300, 900)
-
-
-        # Panel XML dimensions (Length=larger DXF dim, Width=smaller DXF dim)
-        panel_xml_length = panel_dy_dxf # 800
-        panel_xml_width = panel_dx_dxf # 200
-        panel_type = 'back_capable'
-
-
-        # Test a point within the front sheet bbox, which is inside the panel's secondary bbox
-        # Entity DXF point: e.g., (1100 + 50, 100 + 400) = (1150, 500)
-        entity_x_dxf_front = 1150.0
-        entity_y_dxf_front = 500.0
-        # This point is inside front_sheet_bbox (1000,0,2000,1000) -> Face 5
-        # Conversion should be relative to panel_secondary_bbox_dxf (1100, 100, 1300, 900)
-        # Panel secondary bbox is vertical in DXF (800 > 200).
-        # Mapping: DXF Y relative to min_y -> XML X, DXF X relative to min_x -> XML Y
-        converted_x_before_mirror_front = entity_y_dxf_front - panel_secondary_bbox_dxf[1] # 500 - 100 = 400
-        converted_y_before_mirror_front = entity_x_dxf_front - panel_secondary_bbox_dxf[0] # 1150 - 1100 = 50
-        # No mirroring for Face 5
-        expected_x_xml_front = converted_x_before_mirror_front # 400
-        expected_y_xml_front = converted_y_before_mirror_front # 50
-        expected_face_front = "5"
-
-        rel_x_front, rel_y_front, face_front = convert_coords_to_panel_system(entity_x_dxf_front, entity_y_dxf_front, panel_type, panel_xml_length, panel_xml_width, panel_primary_bbox_dxf, panel_secondary_bbox_dxf, front_sheet_bbox, back_sheet_bbox, tolerance=0.1)
-        self.assertAlmostEqual(rel_x_front, expected_x_xml_front)
-        self.assertAlmostEqual(rel_y_front, expected_y_xml_front)
-        self.assertEqual(face_front, expected_face_front)
-
-
-        # Test a point within the back sheet bbox, which is inside the panel's primary bbox
-        # Entity DXF point: e.g., (100 + 50, 100 + 400) = (150, 500)
-        entity_x_dxf_back = 150.0
-        entity_y_dxf_back = 500.0
-        # This point is inside back_sheet_bbox (0,0,1000,1000) -> Face 6
-        # Conversion should be relative to panel_primary_bbox_dxf (100, 100, 300, 900)
-        # Panel primary bbox is vertical in DXF (800 > 200).
-        # Mapping: DXF Y relative to min_y -> XML X, DXF X relative to min_x -> XML Y
-        converted_x_before_mirror_back = entity_y_dxf_back - panel_primary_bbox_dxf[1] # 500 - 100 = 400
-        converted_y_before_mirror_back = entity_x_dxf_back - panel_primary_bbox_dxf[0] # 150 - 100 = 50
-        # Expected XML Y after mirroring (relative to panel_xml_width)
-        expected_x_xml_back = converted_x_before_mirror_back # 400
-        expected_y_xml_back = panel_xml_width - converted_y_before_mirror_back # 200 - 50 = 150
-        expected_face_back = "6"
-
-        rel_x_back, rel_y_back, face_back = convert_coords_to_panel_system(entity_x_dxf_back, entity_y_dxf_back, panel_type, panel_xml_length, panel_xml_width, panel_primary_bbox_dxf, panel_secondary_bbox_dxf, front_sheet_bbox, back_sheet_bbox, tolerance=0.1)
-        self.assertAlmostEqual(rel_x_back, expected_x_xml_back)
-        self.assertAlmostEqual(rel_y_back, expected_y_xml_back)
-        self.assertEqual(face_back, expected_face_back)
-
-
-        # Test a point outside both sheet bboxes
-        entity_x_dxf_outside = 5000.0
-        entity_y_dxf_outside = 5000.0
-        rel_x_outside, rel_y_outside, face_outside = convert_coords_to_panel_system(entity_x_dxf_outside, entity_y_dxf_outside, panel_type, panel_xml_length, panel_xml_width, panel_primary_bbox_dxf, panel_secondary_bbox_dxf, front_sheet_bbox, back_sheet_bbox, tolerance=0.1)
-        self.assertIsNone(rel_x_outside)
-        self.assertIsNone(rel_y_outside)
-        self.assertIsNone(face_outside)
-
-
-    def test_get_number_from_layer_name_after_D(self):
-        """Test get_number_from_layer_name_after_D function."""
-        self.assertEqual(get_number_from_layer_name_after_D("ABF_D10", "ABF_D"), 10)
-        self.assertEqual(get_number_from_layer_name_after_D("ABF_D15", "ABF_D"), 15)
-        self.assertEqual(get_number_from_layer_name_after_D("ABF_D5", "ABF_D"), 5)
-        self.assertIsNone(get_number_from_layer_name_after_D("ABF_CUTTING_LINES", "ABF_D"))
-        self.assertIsNone(get_number_from_layer_name_after_D("ABF_D", "ABF_D")) # No number after D
-        self.assertIsNone(get_number_from_layer_name_after_D("ABF_Dabc", "ABF_D")) # Non-numeric after D
-
-
-# --- Main Execution Block ---
-if __name__ == '__main__':
-    # Check if running in test mode
-    import sys
-    if len(sys.argv) > 1 and sys.argv[1] == '--test':
-        # Run tests with proper unittest arguments
-        unittest.main(argv=['first-arg-is-ignored'], exit=False)
-    else:
-        # Normal execution mode - run the conversion UI
-        config = DXF_LAYER_CONFIG
-        ui = TerminalUI(config)
-        ui.run()
