@@ -225,11 +225,33 @@ def find_and_group_panels(doc, config):
     return grouped_panels
 
 
-def convert_coords_to_panel_system(entity_x, entity_y, panel_type, panel_xml_length, panel_xml_width, primary_bbox_panel, secondary_bbox_panel, sheet_border_front_bbox, sheet_border_back_bbox, tolerance=0.1):
+def convert_coords_to_panel_system(point, panel_type, panel_xml_length, panel_xml_width,
+                            primary_bbox_panel, secondary_bbox_panel,
+                            sheet_border_front_bbox, sheet_border_back_bbox,
+                            tolerance=0.1):
     """
     Converts DXF coordinates to XML panel coordinates with proper scaling and bounds checking.
-    Returns transformed coordinates (rel_x, rel_y) and determined face (5 or 6).
+    Returns a dictionary with transformed coordinates ('x', 'y') and determined face ('face').
+    
+    Args:
+        point: Tuple of (x, y) coordinates in DXF space
+        panel_type: Type of panel ('front_only' or 'back_capable')
+        panel_xml_length: Length of the panel in XML coordinates
+        panel_xml_width: Width of the panel in XML coordinates
+        primary_bbox_panel: Tuple of (min_x, min_y, max_x, max_y) for primary panel bbox
+        secondary_bbox_panel: Tuple of (min_x, min_y, max_x, max_y) for secondary panel bbox
+        sheet_border_front_bbox: Tuple of (min_x, min_y, max_x, max_y) for front sheet bbox
+        sheet_border_back_bbox: Tuple of (min_x, min_y, max_x, max_y) for back sheet bbox
+        tolerance: Tolerance for coordinate checks (default: 0.1)
+    
+    Returns:
+        Dictionary with 'x', 'y', and 'face' keys or None if conversion fails
     """
+    if not isinstance(point, (list, tuple)) or len(point) < 2:
+        print(f"DEBUG:   Invalid point format: {point}")
+        return None
+        
+    entity_x, entity_y = point[0], point[1]
     print(f"DEBUG:   Converting DXF point ({entity_x:.3f}, {entity_y:.3f}) for panel (Type: {panel_type})")
     print(f"DEBUG:     Panel XML dimensions: {panel_xml_length:.0f} x {panel_xml_width:.0f}")
 
@@ -249,11 +271,11 @@ def convert_coords_to_panel_system(entity_x, entity_y, panel_type, panel_xml_len
         face = "6"
     else:
         print(f"DEBUG:     Point not in any sheet bbox")
-        return None, None, None
+        return None
         
     if not reference_bbox:
         print(f"DEBUG:     No valid reference bbox")
-        return None, None, None
+        return None
 
     # Get reference bbox dimensions and current point position
     ref_min_x, ref_min_y, ref_max_x, ref_max_y = reference_bbox
@@ -263,7 +285,7 @@ def convert_coords_to_panel_system(entity_x, entity_y, panel_type, panel_xml_len
     # Calculate relative position within reference bbox (0-1)
     if ref_width == 0 or ref_height == 0:
         print(f"DEBUG:     Invalid reference bbox dimensions")
-        return None, None, None
+        return None
         
     rel_pos_x = (entity_x - ref_min_x) / ref_width
     rel_pos_y = (entity_y - ref_min_y) / ref_height
@@ -281,183 +303,126 @@ def convert_coords_to_panel_system(entity_x, entity_y, panel_type, panel_xml_len
     xml_y = max(0.0, min(xml_y, panel_xml_width))
     
     print(f"DEBUG:     Transformed to XML coordinates: ({xml_x:.3f}, {xml_y:.3f}), Face: {face}")
-    return xml_x, xml_y, face
+    return {'x': xml_x, 'y': xml_y, 'face': face}
 
 
-def create_drilling_xml(machines_element, entity, panel_type, panel_length, panel_width,
-                     primary_bbox, secondary_bbox, front_bbox, back_bbox, tolerance, config):
-    """
-    Creates an XML element for a drilling operation from a CIRCLE entity.
-    """
+def create_drilling_xml(machines_element, entity, panel_type, panel_length, panel_width, 
+                       primary_bbox_panel, secondary_bbox_panel, sheet_border_front_bbox,
+                       sheet_border_back_bbox, tolerance, config):
+    """Creates an XML element for a drilling operation."""
     if not hasattr(entity, 'dxf') or not hasattr(entity.dxf, 'center'):
-        print(f"DEBUG: موجودیت سوراخکاری فاقد نقطه مرکز است")
+        print(f"DEBUG:     خطا: موجودیت سوراخکاری فاقد مرکز است")
         return
 
-    # Extract circle properties
-    center = entity.dxf.center
-    radius = entity.dxf.radius
-    layer = entity.dxf.layer
+    # Get the diameter from the layer name
+    diameter = get_number_from_layer_name_after_D(entity.dxf.layer, config['drilling_prefix'])
+    if diameter is None:
+        print(f"DEBUG:     خطا: قطر سوراخکاری از نام لایه {entity.dxf.layer} قابل استخراج نیست")
+        return
 
-    # Convert coordinates to panel system
-    panel_coords = convert_coords_to_panel_system(
-        (center.x, center.y),
-        panel_type,
-        panel_length,
-        panel_width,
-        primary_bbox,
-        secondary_bbox,
-        front_bbox,
-        back_bbox,
-        tolerance
-    )
+    # Extract center point
+    center_point = (entity.dxf.center.x, entity.dxf.center.y)
     
-    if not panel_coords:
-        print(f"DEBUG: تبدیل مختصات سوراخکاری ناموفق بود")
+    # Convert coordinates to panel system
+    coords = convert_coords_to_panel_system(center_point, panel_type, panel_length, panel_width,
+                                          primary_bbox_panel, secondary_bbox_panel,
+                                          sheet_border_front_bbox, sheet_border_back_bbox)
+    if coords is None:
+        print(f"DEBUG:     خطا: تبدیل مختصات سوراخکاری ناموفق بود")
         return
 
-    x, y, z, face = panel_coords
-
-    # Create the Machining element
-    machining = ET.SubElement(machines_element, 'Machining')
-    machining.set('Type', '2')  # Type 2 is for drilling
-    machining.set('Face', str(face))
-
-    # Parse diameter from layer name (e.g., ABF_D8 means 8mm diameter)
-    try:
-        diameter = float(layer.split('D')[1])
-    except (IndexError, ValueError):
-        print(f"DEBUG: قطر سوراخ از نام لایه {layer} قابل استخراج نیست")
-        diameter = 8.0  # Default diameter if not specified
-
-    # Set attributes
-    machining.set('X', f"{x:.3f}")
-    machining.set('Y', f"{y:.3f}")
-    machining.set('Z', f"{z:.3f}")
-    machining.set('Depth', "16")  # Default depth, can be configured
-    machining.set('Diameter', f"{diameter:.1f}")
+    # Create the Machine element
+    machine = ET.SubElement(machines_element, 'Machine')
+    machine.set('Type', '2')  # Type 2 is for drilling
+    machine.set('X', f"{coords['x']:.3f}")
+    machine.set('Y', f"{coords['y']:.3f}")
+    machine.set('Z', "0.000")  # Default Z position
+    machine.set('Diameter', str(diameter))
+    machine.set('Face', coords['face'])
+    print(f"DEBUG:     سوراخکاری اضافه شد: مختصات=({coords['x']:.3f}, {coords['y']:.3f}), قطر={diameter}, سطح={coords['face']}")
 
 def create_pocket_xml(machines_element, entity, panel_length, panel_width, panel_type,
-                     primary_bbox, secondary_bbox, front_bbox, back_bbox, tolerance, config):
-    """
-    Creates an XML element for a pocket operation from a LWPOLYLINE entity.
-    """
-    if not hasattr(entity, 'vertices'):
-        print(f"DEBUG: موجودیت پاکت فاقد نقاط است")
+                     primary_bbox_panel, secondary_bbox_panel, sheet_border_front_bbox,
+                     sheet_border_back_bbox, tolerance, config):
+    """Creates an XML element for a pocket operation."""
+    if not hasattr(entity, 'get_points'):
+        print(f"DEBUG:     خطا: موجودیت پاکت فاقد نقاط است")
         return
 
-    vertices = list(entity.vertices())
-    if len(vertices) < 3:
-        print(f"DEBUG: موجودیت پاکت باید حداقل 3 نقطه داشته باشد")
+    vertices = [(p[0], p[1]) for p in entity.get_points()]
+    if not vertices:
+        print(f"DEBUG:     خطا: موجودیت پاکت فاقد نقطه است")
         return
 
-    # Convert all vertices to panel system
-    panel_points = []
-    face = None
-    
-    for vertex in vertices:
-        coords = convert_coords_to_panel_system(
-            (vertex[0], vertex[1]),
-            panel_type,
-            panel_length,
-            panel_width,
-            primary_bbox,
-            secondary_bbox,
-            front_bbox,
-            back_bbox,
-            tolerance
-        )
-        
-        if not coords:
-            print(f"DEBUG: تبدیل مختصات نقطه پاکت ناموفق بود")
-            return
-            
-        x, y, z, current_face = coords
-        if face is None:
-            face = current_face
-        elif face != current_face:
-            print(f"DEBUG: نقاط پاکت در وجوه مختلف قرار دارند")
-            return
-            
-        panel_points.append((x, y))
+    # Get center point of the pocket
+    center_x, center_y = get_bbox_center(vertices)
+    if center_x is None:
+        print(f"DEBUG:     خطا: محاسبه مرکز پاکت ناموفق بود")
+        return
 
-    # Create the Machining element
-    machining = ET.SubElement(machines_element, 'Machining')
-    machining.set('Type', '3')  # Type 3 is for pocket
-    machining.set('Face', str(face))
-    machining.set('Depth', "8")  # Default depth for pockets
+    # Convert coordinates to panel system
+    coords = convert_coords_to_panel_system((center_x, center_y), panel_type, panel_length, panel_width,
+                                          primary_bbox_panel, secondary_bbox_panel,
+                                          sheet_border_front_bbox, sheet_border_back_bbox)
+    if coords is None:
+        print(f"DEBUG:     خطا: تبدیل مختصات پاکت ناموفق بود")
+        return
 
-    # Create Geometry element and add points
-    geometry = ET.SubElement(machining, 'Geometry')
-    for i, (x, y) in enumerate(panel_points):
-        point = ET.SubElement(geometry, 'Point')
-        point.set('Index', str(i + 1))
-        point.set('X', f"{x:.3f}")
-        point.set('Y', f"{y:.3f}")
+    # Calculate pocket dimensions
+    min_x, min_y, max_x, max_y = get_bbox(vertices)
+    width = abs(max_x - min_x)
+    height = abs(max_y - min_y)
+
+    # Create the Machine element for pocket
+    machine = ET.SubElement(machines_element, 'Machine')
+    machine.set('Type', '3')  # Type 3 is for pocket/side holes
+    machine.set('X', f"{coords['x']:.3f}")
+    machine.set('Y', f"{coords['y']:.3f}")
+    machine.set('Z', "0.000")  # Default Z position
+    machine.set('Width', f"{width:.3f}")
+    machine.set('Height', f"{height:.3f}")
+    machine.set('Face', coords['face'])
+    print(f"DEBUG:     پاکت اضافه شد: مختصات=({coords['x']:.3f}, {coords['y']:.3f}), ابعاد=({width:.3f}x{height:.3f}), سطح={coords['face']}")
 
 def create_groove_xml(machines_element, entity, panel_length, panel_width, panel_type,
-                     primary_bbox, secondary_bbox, front_bbox, back_bbox, tolerance, 
-                     panel_thickness, config):
-    """
-    Creates an XML element for a groove operation from a LWPOLYLINE entity.
-    """
-    if not hasattr(entity, 'vertices'):
-        print(f"DEBUG: موجودیت شیار فاقد نقاط است")
+                     primary_bbox_panel, secondary_bbox_panel, sheet_border_front_bbox,
+                     sheet_border_back_bbox, tolerance, panel_thickness, config):
+    """Creates an XML element for a groove operation."""
+    if not hasattr(entity, 'get_points'):
+        print(f"DEBUG:     خطا: موجودیت شیار فاقد نقاط است")
         return
 
-    vertices = list(entity.vertices())
-    if len(vertices) < 2:
-        print(f"DEBUG: موجودیت شیار باید حداقل 2 نقطه داشته باشد")
+    vertices = [(p[0], p[1]) for p in entity.get_points()]
+    if not vertices:
+        print(f"DEBUG:     خطا: موجودیت شیار فاقد نقطه است")
         return
 
-    # Convert all vertices to panel system
-    panel_points = []
-    face = None
-    
+    # Convert each vertex to panel coordinates
+    converted_vertices = []
     for vertex in vertices:
-        coords = convert_coords_to_panel_system(
-            (vertex[0], vertex[1]),
-            panel_type,
-            panel_length,
-            panel_width,
-            primary_bbox,
-            secondary_bbox,
-            front_bbox,
-            back_bbox,
-            tolerance
-        )
-        
-        if not coords:
-            print(f"DEBUG: تبدیل مختصات نقطه شیار ناموفق بود")
+        coords = convert_coords_to_panel_system(vertex, panel_type, panel_length, panel_width,
+                                              primary_bbox_panel, secondary_bbox_panel,
+                                              sheet_border_front_bbox, sheet_border_back_bbox)
+        if coords is None:
+            print(f"DEBUG:     خطا: تبدیل مختصات شیار ناموفق بود")
             return
-            
-        x, y, z, current_face = coords
-        if face is None:
-            face = current_face
-        elif face != current_face:
-            print(f"DEBUG: نقاط شیار در وجوه مختلف قرار دارند")
-            return
-            
-        panel_points.append((x, y))
+        converted_vertices.append((coords['x'], coords['y']))
+        face = coords['face']  # All vertices should have the same face
 
-    # Create the Machining element
-    machining = ET.SubElement(machines_element, 'Machining')
-    machining.set('Type', '4')  # Type 4 is for groove
-    machining.set('Face', str(face))
+    # Create the Machine element for groove
+    machine = ET.SubElement(machines_element, 'Machine')
+    machine.set('Type', '4')  # Type 4 is for grooves
     
-    # Default groove depth is half the panel thickness
-    groove_depth = panel_thickness / 2.0
-    machining.set('Depth', f"{groove_depth:.1f}")
-    
-    # Set default groove width
-    machining.set('Width', "4.0")  # 4mm default width for grooves
-
-    # Create Geometry element and add points
-    geometry = ET.SubElement(machining, 'Geometry')
-    for i, (x, y) in enumerate(panel_points):
-        point = ET.SubElement(geometry, 'Point')
-        point.set('Index', str(i + 1))
+    # Add vertex points as subelements
+    for i, (x, y) in enumerate(converted_vertices, 1):
+        point = ET.SubElement(machine, f'Point{i}')
         point.set('X', f"{x:.3f}")
         point.set('Y', f"{y:.3f}")
+        point.set('Z', "0.000")  # Default Z position
+
+    machine.set('Face', face)
+    machine.set('Depth', f"{panel_thickness/2:.3f}")  # Default groove depth is half panel thickness
+    print(f"DEBUG:     شیار اضافه شد: تعداد نقاط={len(converted_vertices)}, سطح={face}")
 
 
 def process_machining_entities_for_panel(doc, panel_element, panel_group_info, panel_length, panel_width, panel_thickness, config):
@@ -467,7 +432,10 @@ def process_machining_entities_for_panel(doc, panel_element, panel_group_info, p
     into Machining XML elements by calling appropriate helper functions.
     Uses layer names from config.
     """
-    machines_element = panel_element.find('Machines') # Get the already created Machines element
+    # Create or get the Machines element
+    machines_element = panel_element.find('Machines')
+    if machines_element is None:
+        machines_element = ET.SubElement(panel_element, 'Machines')
     borders_in_group = panel_group_info['borders']
     panel_type = panel_group_info['type']
     # Get sheet border bboxes from panel_group_info
@@ -565,33 +533,21 @@ def process_machining_entities_for_panel(doc, panel_element, panel_group_info, p
             print(f"DEBUG:     موجودیت {entity.dxftype()} در لایه {entity.dxf.layer} با الگوهای ماشینکاری شناخته شده مطابقت ندارد. رد می شود.")
 
 
-def create_panel_xml_structure(panel_id, panel_name, length, width, thickness):
-    """
-    Creates the basic XML structure for a panel with given dimensions.
-    Returns the root 'Panel' element and its 'Machines' child element.
-    """
-    # Create root Panel element with attributes
-    panel_element = ET.Element("Panel",
-                             ID=str(panel_id),
-                             Name=panel_name,
-                             Length=f"{length:.3f}",
-                             Width=f"{width:.3f}",
-                             Thickness=f"{thickness:.3f}",
-                             CreationDate="",
-                             Grain="0",
-                             MaterialType="0")
-
-    # Add required child elements
-    # Add Machines element (will contain machining operations)
-    machines_element = ET.SubElement(panel_element, "Machines")
+def create_panel_xml_structure(length, width, thickness):
+    """Creates the basic XML structure for a panel"""
+    # Create root element
+    root = ET.Element('PanelAnalysis')
     
-    # Add EmptySlots element (required but typically empty)
-    empty_slots = ET.SubElement(panel_element, "EmptySlots")
+    # Add Panel element
+    panel = ET.SubElement(root, 'Panel')
+    panel.set('Length', f"{length:.3f}")
+    panel.set('Width', f"{width:.3f}")
+    panel.set('Thickness', f"{thickness:.3f}")
     
-    # Add Parameters element (required but typically empty)
-    parameters = ET.SubElement(panel_element, "Parameters")
-
-    return panel_element, machines_element
+    # Add Machines element
+    machines = ET.SubElement(panel, 'Machines')
+    
+    return root, panel
 
 
 # --- Main Conversion Function ---
@@ -686,6 +642,86 @@ def dxf_to_custom_xml(input_file, config, panel_thickness=16.0): # Removed unuse
         return False # Indicate failure
 
 
+def process_dxf_file(input_file, config):
+    """
+    Processes a DXF file to extract panel information and create XML files.
+    Returns True if successful, False otherwise.
+    """
+    try:
+        print(f"DEBUG: در حال خواندن فایل DXF: {input_file}")
+        doc = ezdxf.readfile(input_file)
+        
+        # Find and group panels
+        print("DEBUG: در حال جستجو و گروه‌بندی پنل‌ها...")
+        panel_groups = find_and_group_panels(doc, config)
+        if not panel_groups:
+            print("❌ خطا: هیچ پنلی در فایل DXF یافت نشد.")
+            return False
+
+        print(f"DEBUG: {len(panel_groups)} پنل فیزیکی یافت شد.")
+
+        # Process each panel group
+        for i, panel_group_info in enumerate(panel_groups):
+            print(f"\nDEBUG: --- شروع پردازش پنل فیزیکی شماره {i+1} ---")
+            
+            # Extract panel dimensions from the first border entity
+            panel_dimensions = get_bbox_dimensions_sorted(panel_group_info['primary_border'].vertices())
+            if not panel_dimensions or len(panel_dimensions) != 2:
+                print(f"❌ خطا: استخراج ابعاد پنل شماره {i+1} ناموفق بود.")
+                continue
+
+            panel_width, panel_length = panel_dimensions
+            panel_thickness = 18.0  # Default thickness in mm
+
+            # Create output directory if it doesn't exist
+            output_dir = os.path.splitext(input_file)[0]
+            os.makedirs(output_dir, exist_ok=True)
+
+            # Create output filename based on panel dimensions and number
+            output_file = os.path.join(output_dir, 
+                                     f"{os.path.splitext(os.path.basename(input_file))[0]}.{panel_length}x{panel_width}.{i+1}.xml")
+
+            # Create XML structure
+            print(f"DEBUG: ایجاد ساختار XML برای پنل {i+1}...")
+            root, panel_element = create_panel_xml_structure(panel_length, panel_width, panel_thickness)
+            
+            # Get the Machines element for adding machining operations
+            machines_element = panel_element.find('Machines')
+
+            # Process machining entities for this panel
+            print(f"DEBUG: پردازش موجودیت‌های ماشینکاری برای پنل {i+1}...")
+            process_machining_entities_for_panel(doc, machines_element, panel_group_info,
+                                               panel_length, panel_width, panel_thickness, config)
+
+            # Save the XML file
+            print(f"DEBUG: در حال ذخیره فایل XML برای پنل {i+1}...")
+            # Use indent for pretty printing the XML
+            xml_string = ET.tostring(root, encoding='utf-8').decode('utf-8')
+            dom = xml.dom.minidom.parseString(xml_string)
+            pretty_xml_string = dom.toprettyxml(indent="  ", encoding='utf-8')
+
+            with open(output_file, "wb") as f:
+                f.write(pretty_xml_string)
+
+            print(f"✅ فایل '{output_file}' با موفقیت برای پنل فیزیکی شماره {i+1} (نوع: {panel_group_info['type']}) ایجاد شد.")
+            print(f"DEBUG: --- پایان پردازش پنل فیزیکی شماره {i+1} ---")
+
+        return True
+
+    except FileNotFoundError:
+        print(f"❌ خطا: فایل ورودی '{input_file}' یافت نشد.")
+        return False
+    except ezdxf.DXFStructureError:
+        print(f"❌ خطا: فایل '{input_file}' یک فایل DXF معتبر نیست یا خراب است.")
+        return False
+    except Exception as e:
+        print(f"❌ خطا در پردازش فایل DXF: {str(e)}")
+        # Print full traceback for easier debugging of unexpected errors
+        import traceback
+        traceback.print_exc()
+        return False
+
+
 # --- Terminal UI Class ---
 class TerminalUI:
     """Handles user interaction in the terminal."""
@@ -748,3 +784,16 @@ class TerminalUI:
     def _get_dxf_files_in_current_directory(self):
         """Lists all files with .dxf extension in the current directory."""
         return [f for f in os.listdir('.') if os.path.isfile(f) and f.lower().endswith('.dxf')]
+
+
+if __name__ == "__main__":
+    print("DEBUG: شروع اجرای برنامه")
+    if len(sys.argv) > 1:
+        input_file = sys.argv[1]
+        print(f"DEBUG: پردازش فایل ورودی: {input_file}")
+        success = process_dxf_file(input_file, DXF_LAYER_CONFIG)
+        sys.exit(0 if success else 1)
+    else:
+        # No command line argument provided, start the terminal UI
+        ui = TerminalUI(DXF_LAYER_CONFIG)
+        ui.run()

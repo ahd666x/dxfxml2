@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PanelAnalysis>
+  <Panel Length="840.000" Width="230.000" Thickness="18.000">
+    <Machines>
+      <Machines>
+        <Machine Type="2" X="0.000" Y="92.274" Z="0.000" Diameter="10" Face="6"/>
+        <Machine Type="2" X="0.000" Y="0.000" Z="0.000" Diameter="10" Face="6"/>
+        <Machine Type="2" X="0.000" Y="211.107" Z="0.000" Diameter="15" Face="6"/>
+        <Machine Type="3" X="0.000" Y="215.762" Z="0.000" Width="8.000" Height="34.000" Face="6"/>
+        <Machine Type="2" X="0.000" Y="8.488" Z="0.000" Diameter="15" Face="6"/>
+        <Machine Type="3" X="0.000" Y="3.833" Z="0.000" Width="8.000" Height="34.000" Face="6"/>
+        <Machine Type="2" X="0.000" Y="9.310" Z="0.000" Diameter="15" Face="6"/>
+        <Machine Type="3" X="0.000" Y="9.310" Z="0.000" Width="34.000" Height="8.000" Face="6"/>
+        <Machine Type="2" X="0.000" Y="0.000" Z="0.000" Diameter="10" Face="6"/>
+        <Machine Type="2" X="0.000" Y="0.000" Z="0.000" Diameter="10" Face="6"/>
+        <Machine Type="2" X="0.000" Y="0.000" Z="0.000" Diameter="10" Face="6"/>
+        <Machine Type="2" X="0.000" Y="147.310" Z="0.000" Diameter="10" Face="6"/>
+        <Machine Type="2" X="0.000" Y="147.857" Z="0.000" Diameter="10" Face="6"/>
+        <Machine Type="2" X="0.000" Y="147.310" Z="0.000" Diameter="10" Face="6"/>
+        <Machine Type="2" X="840.000" Y="230.000" Z="0.000" Diameter="10" Face="5"/>
+        <Machine Type="2" X="840.000" Y="230.000" Z="0.000" Diameter="10" Face="5"/>
+        <Machine Type="2" X="840.000" Y="36.417" Z="0.000" Diameter="10" Face="5"/>
+        <Machine Type="4" Face="5" Depth="9.000">
+          <Point1 X="840.000" Y="230.000" Z="0.000"/>
+          <Point2 X="840.000" Y="26.286" Z="0.000"/>
+          <Point3 X="840.000" Y="26.286" Z="0.000"/>
+          <Point4 X="840.000" Y="230.000" Z="0.000"/>
+        </Machine>
+        <Machine Type="2" X="704.870" Y="227.536" Z="0.000" Diameter="10" Face="5"/>
+        <Machine Type="2" X="135.130" Y="227.536" Z="0.000" Diameter="10" Face="5"/>
+        <Machine Type="2" X="704.870" Y="2.464" Z="0.000" Diameter="10" Face="5"/>
+        <Machine Type="2" X="135.130" Y="2.464" Z="0.000" Diameter="10" Face="5"/>
+        <Machine Type="2" X="420.000" Y="2.464" Z="0.000" Diameter="10" Face="5"/>
+        <Machine Type="2" X="0.000" Y="18.071" Z="0.000" Diameter="15" Face="5"/>
+        <Machine Type="3" X="0.000" Y="13.417" Z="0.000" Width="8.000" Height="34.000" Face="5"/>
+        <Machine Type="2" X="0.000" Y="18.071" Z="0.000" Diameter="15" Face="5"/>
+        <Machine Type="3" X="0.000" Y="13.417" Z="0.000" Width="8.000" Height="34.000" Face="5"/>
+        <Machine Type="2" X="0.000" Y="220.690" Z="0.000" Diameter="15" Face="5"/>
+        <Machine Type="3" X="0.000" Y="225.345" Z="0.000" Width="8.000" Height="34.000" Face="5"/>
+        <Machine Type="2" X="0.000" Y="119.381" Z="0.000" Diameter="15" Face="5"/>
+        <Machine Type="3" X="0.000" Y="119.381" Z="0.000" Width="34.000" Height="8.000" Face="5"/>
+        <Machine Type="2" X="0.000" Y="18.893" Z="0.000" Diameter="15" Face="5"/>
+        <Machine Type="3" X="0.000" Y="18.893" Z="0.000" Width="34.000" Height="8.000" Face="5"/>
+        <Machine Type="2" X="0.000" Y="220.690" Z="0.000" Diameter="15" Face="5"/>
+        <Machine Type="3" X="0.000" Y="225.345" Z="0.000" Width="8.000" Height="34.000" Face="5"/>
+        <Machine Type="2" X="0.000" Y="230.000" Z="0.000" Diameter="15" Face="5"/>
+        <Machine Type="3" X="0.000" Y="230.000" Z="0.000" Width="8.000" Height="34.000" Face="5"/>
+        <Machine Type="2" X="0.000" Y="230.000" Z="0.000" Diameter="15" Face="5"/>
+        <Machine Type="3" X="0.000" Y="230.000" Z="0.000" Width="8.000" Height="34.000" Face="5"/>
+        <Machine Type="2" X="0.000" Y="230.000" Z="0.000" Diameter="15" Face="5"/>
+        <Machine Type="3" X="0.000" Y="230.000" Z="0.000" Width="8.000" Height="34.000" Face="5"/>
+        <Machine Type="2" X="0.000" Y="220.690" Z="0.000" Diameter="15" Face="5"/>
+        <Machine Type="3" X="0.000" Y="225.345" Z="0.000" Width="8.000" Height="34.000" Face="5"/>
+        <Machine Type="2" X="0.000" Y="220.690" Z="0.000" Diameter="15" Face="5"/>
+        <Machine Type="3" X="0.000" Y="225.345" Z="0.000" Width="8.000" Height="34.000" Face="5"/>
+      </Machines>
+    </Machines>
+  </Panel>
+</PanelAnalysis>
