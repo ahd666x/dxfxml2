@@ -284,248 +284,180 @@ def convert_coords_to_panel_system(entity_x, entity_y, panel_type, panel_xml_len
     return xml_x, xml_y, face
 
 
-def create_drilling_xml(machines_element, entity, panel_type, panel_length, panel_width, primary_bbox_panel, secondary_bbox_panel, sheet_border_front_bbox, sheet_border_back_bbox, tolerance, config):
+def create_drilling_xml(machines_element, entity, panel_type, panel_length, panel_width,
+                     primary_bbox, secondary_bbox, front_bbox, back_bbox, tolerance, config):
     """
-    Processes a CIRCLE entity (ABF_D*) and adds a Machining Type=2 (Drilling) element to XML.
-    Determines Face based on which sheet border the entity is within, and Depth from layer name.
-    Uses layer names from config.
-    Ensures all coordinates are within panel bounds.
+    Creates an XML element for a drilling operation from a CIRCLE entity.
     """
-    center = entity.dxf.center # Circle center coordinates (includes Z)
-    # Use the coordinate conversion function that maps relative to PANEL border bounds and determines Face.
-    rel_x, rel_y, face = convert_coords_to_panel_system(center.x, center.y, panel_type, panel_length, panel_width, primary_bbox_panel, secondary_bbox_panel, sheet_border_front_bbox, sheet_border_back_bbox, tolerance)
-
-    if rel_x is None or rel_y is None or face is None:
-        print(f"DEBUG:   ایجاد Machining Type=2 (Drilling) برای موجودیت {entity.dxftype()} در لایه {entity.dxf.layer} به دلیل عدم تبدیل مختصات یا Face ناموفق بود.")
-        return # Skip if coordinate conversion or face determination failed
-
-    # Use the passed panel_length and panel_width for the debug message
-    print(f"DEBUG:   مرکز دایره (DXF): ({center.x:.3f}, {center.y:.3f}, Z={center.z:.3f}) -> تبدیل شده (پنل XML - به سیستم {panel_length:.0f}x{panel_width:.0f}): ({rel_x:.3f}, {rel_y:.3f}), Face: {face}") # Updated Debug message
-
-    layer_name_upper = entity.dxf.layer.upper()
-    diameter = round(entity.dxf.radius * 2, 3) # Use the actual circle diameter from DXF
-
-    # Get depth directly from the number after D in the layer name
-    depth_number_from_layer = get_number_from_layer_name_after_D(layer_name_upper, config['drilling_prefix'])
-    depth = str(depth_number_from_layer) if depth_number_from_layer is not None else "0" # Use the extracted number as depth
-
-    print(f"DEBUG:   پنل {panel_type}، موجودیت {entity.dxftype()} روی لایه {entity.dxf.layer} (قطر {diameter}) -> Face {face}, عمق از لایه: {depth}") # Use extracted depth in debug
-
-    print(f"DEBUG:   در حال ایجاد Machining Type=2 (Drilling) در XML برای X={rel_x:.3f}, Y={rel_y:.3f}, Face={face}, Diameter={diameter:.3f}, Depth={depth}")
-    ET.SubElement(machines_element, "Machining",
-                  Type="2", # Drilling
-                  IsGenCode="2",
-                  Face=face, # Use the determined face
-                  X=f"{rel_x:.3f}",
-                  Y=f"{rel_y:.3f}",
-                  Diameter=f"{diameter:.3f}", # Use actual diameter from DXF entity
-                  Depth=depth) # Use depth derived from layer name
-
-
-def create_pocket_xml(machines_element, entity, panel_length, panel_width, panel_type, primary_bbox_panel, secondary_bbox_panel, sheet_border_front_bbox, sheet_border_back_bbox, tolerance, config):
-    """
-    Processes an ABF_DSIDE_8 LWPOLYLINE entity and adds a Machining Type=1 (Pocket/Routing) element to XML.
-    Determines Face based on proximity to panel edges (Faces 1, 2, 3, 4) in the XML system.
-    Uses layer names from config.
-    """
-    vertices = list(entity.vertices())
-    # Ensure it's a closed polyline with at least 4 vertices
-    if len(vertices) < 4 or not entity.dxf.flags & 1:
-        print(f"DEBUG:   LWPOLYLINE روی لایه {config['pocket_layer']} یک مستطیل بسته معتبر نیست یا تعداد نقاط کافی ندارد. رد می شود.")
+    if not hasattr(entity, 'dxf') or not hasattr(entity.dxf, 'center'):
+        print(f"DEBUG: موجودیت سوراخکاری فاقد نقطه مرکز است")
         return
 
-    rect_min_x = rect_min_y = float('inf')
-    rect_max_x = rect_max_y = -float('inf')
-    for v in vertices:
-        rect_min_x = min(rect_min_x, v[0])
-        rect_min_y = min(rect_min_y, v[1])
-        rect_max_x = max(rect_max_x, v[0])
-        rect_max_y = max(rect_max_y, v[1])
+    # Extract circle properties
+    center = entity.dxf.center
+    radius = entity.dxf.radius
+    layer = entity.dxf.layer
 
-    pocket_z_xml = "8" # Z height from bottom of panel (fixed based on layer name)
-    rect_dx = rect_max_x - rect_min_x
-    rect_dy = rect_max_y - rect_min_y
-    # Pocket depth in XML is the larger dimension of the DXF rectangle
-    pocket_depth_xml = max(rect_dx, rect_dy)
-    pocket_diameter_xml = "8" # Pocket tool diameter in XML is usually a fixed value (e.g., 8 for ABF_DSIDE_8)
-
-    center_orig_x = (rect_min_x + rect_max_x) / 2.0
-    center_orig_y = (rect_min_y + rect_max_y) / 2.0
-    # Convert Pocket center to local panel coordinate system (Length x Width)
-    # Note: Use the standard tolerance for coordinate conversion
-    # Pass PANEL bboxes and sheet bboxes for conversion
-    center_rel_x, center_rel_y, determined_face_from_sheet = convert_coords_to_panel_system(center_orig_x, center_orig_y, panel_type, panel_length, panel_width, primary_bbox_panel, secondary_bbox_panel, sheet_border_front_bbox, sheet_border_back_bbox, tolerance)
-
-    if center_rel_x is None or center_rel_y is None or determined_face_from_sheet is None:
-        print(f"DEBUG:   ایجاد Machining Type=1 (Pocket) برای موجودیت {entity.dxftype()} در لایه {entity.dxf.layer} به دلیل عدم تبدیل مختصات یا Face ناموفق بود.")
-        return # Skip if coordinate conversion or face determination failed
-
-    print(f"DEBUG:   مرکز Pocket (DXF): ({center_orig_x:.3f}, {center_orig_y:.3f}) -> تبدیل شده (پنل XML - به سیستم {panel_length:.0f}x{panel_width:.0f}): ({center_rel_x:.3f}, {center_rel_y:.3f}), Face از ورق: {determined_face_from_sheet}") # Updated Debug message
-
-    # --- Determine Face (1, 2, 3, or 4) for Type=1 based on position in XML panel system ---
-    # As per user's strict rule: Type 1 must have Faces 1, 2, 3, or 4.
-    # Determine Face based on proximity to XML panel edges using an increased tolerance.
-    face = None # Start with no face assigned
-
-    # Use a larger tolerance for determining which edge the pocket is on
-    pocket_edge_tolerance = 30.0 # Increased tolerance (adjust if needed based on DXF layout)
-
-    is_close_to_min_y_panel = math.isclose(center_rel_y, 0, abs_tol=pocket_edge_tolerance) # Near Y=0 (Bottom)
-    is_close_to_max_y_panel = math.isclose(center_rel_y, panel_width, abs_tol=pocket_edge_tolerance) # Near Y=Width (Top)
-    is_close_to_min_x_panel = math.isclose(center_rel_x, 0, abs_tol=pocket_edge_tolerance) # Near X=0 (Left)
-    is_close_to_max_x_panel = math.isclose(center_rel_x, panel_length, abs_tol=pocket_edge_tolerance) # Near X=Length (Right)
-
-    print(f"DEBUG:   بررسی نزدیکی Pocket به لبه های پنل در سیستم پنل (تلرانس {pocket_edge_tolerance}): min_y_panel={is_close_to_min_y_panel}, max_y_panel={is_close_to_max_y_panel}, min_x_panel={is_close_to_min_x_panel}, max_x_panel={is_close_to_max_x_panel}")
-
-    # Assign Face based on proximity to XML edges (Bottom->2, Top->1, Right->3, Left->4)
-    # Prioritize Y-edges (Bottom/Top) if close to a corner (adjust priority if needed)
-    # Based on the sample XML and common practice:
-    # Face 1: Top edge (Y=Width in XML)
-    # Face 2: Bottom edge (Y=0 in XML)
-    # Face 3: Right edge (X=Length in XML)
-    # Face 4: Left edge (X=0 in XML)
-
-    if is_close_to_max_y_panel: face = "1" # Top Edge (Y=Width)
-    elif is_close_to_min_y_panel: face = "2" # Bottom Edge (Y=0)
-    elif is_close_to_max_x_panel: face = "3" # Right Edge (X=Length)
-    elif is_close_to_min_x_panel: face = "4" # Left Edge
-
-    print(f"DEBUG:   Assigned Face after proximity check: {face}") # Added debug print
-
-
-    if face is None:
-         # If the Pocket is not close to any edge within the increased tolerance.
-         # Assign a default Face (e.g., "5") and log a warning.
-         # As per user's requirement, Type=1 MUST have Face 1-4.
-         # If no edge is detected, this indicates a potential issue in the DXF or tolerance.
-         # Let's assign Face 5 and keep the warning, as forcing 1-4 might be incorrect for an internal pocket.
-         # However, if these are truly edge pockets that aren't detected, the tolerance might need increasing further.
-         face = "5" # Default Face 5 if not close to any edge
-         print(f"DEBUG:   هشدار: Pocket در مختصات تبدیل شده ({center_rel_x:.3f}, {center_rel_y:.3f}) به هیچ لبه پنل نزدیک نیست (با تلرانس {pocket_edge_tolerance}). Face پیش فرض: {face} (5).")
-
-
-    # X and Y coordinates for Pockets in XML should be on the edge for Faces 1-4.
-    # Adjust X or Y based on the determined Face.
-    xml_x_val = center_rel_x
-    xml_y_val = center_rel_y
-
-    # Snap the XML coordinate to the edge coordinate based on the assigned face (if Face is 1-4)
-    if face == "2": # Bottom Edge (Y=0 in XML)
-        xml_y_val = 0.0
-    elif face == "1": # Top Edge (Y=Width in XML)
-        xml_y_val = panel_width
-    elif face == "3": # Right Edge (X=Length in XML)
-         xml_x_val = panel_length
-    elif face == "4": # Left Edge (X=0 in XML)
-         xml_x_val = 0.0
-    # Note: If face is 5, xml_x_val and xml_y_val remain center_rel_x and center_rel_y.
-
-    print(f"DEBUG:   در حال ایجاد Machining Type=1 (Pocket) در XML برای X={xml_x_val:.3f}, Y={xml_y_val:.3f}, Z={pocket_z_xml}, Face={face}, Diameter={float(pocket_diameter_xml):.3f}, Depth={pocket_depth_xml:.3f}")
-    ET.SubElement(machines_element, "Machining",
-                      Type="1", # Pocket/Routing
-                      IsGenCode="2",
-                      Face=face, # Use the determined face (1-4 or 5)
-                      X=f"{xml_x_val:.3f}",
-                      Y=f"{xml_y_val:.3f}",
-                      Z=pocket_z_xml,
-                      Diameter=f"{float(pocket_diameter_xml):.3f}", # Tool diameter, format as float
-                      Depth=f"{pocket_depth_xml:.3f}") # Cutting depth
-
-
-def create_groove_xml(machines_element, entity, panel_length, panel_width, panel_type, primary_bbox_panel, secondary_bbox_panel, sheet_border_front_bbox, sheet_border_back_bbox, tolerance, panel_thickness, config):
-    """
-    Processes an ABF_GROOVE LWPOLYLINE entity and adds a Machining Type=4 (Groove) element to XML.
-    Determines the groove centerline from the LWPOLYLINE bounding box.
-    Uses layer names from config. Face is typically 5 (front).
-    """
-    vertices = list(entity.vertices())
-    # Ensure it's a closed polyline with at least 4 vertices (assuming rectangular groove representation)
-    if len(vertices) < 4 or not entity.dxf.flags & 1:
-        print(f"DEBUG:   LWPOLYLINE روی لایه {config['groove_layer']} یک مستطیل بسته معتبر نیست یا تعداد نقاط کافی ندارد. رد می شود.")
+    # Convert coordinates to panel system
+    panel_coords = convert_coords_to_panel_system(
+        (center.x, center.y),
+        panel_type,
+        panel_length,
+        panel_width,
+        primary_bbox,
+        secondary_bbox,
+        front_bbox,
+        back_bbox,
+        tolerance
+    )
+    
+    if not panel_coords:
+        print(f"DEBUG: تبدیل مختصات سوراخکاری ناموفق بود")
         return
 
-    # Calculate the bounding box of the LWPOLYLINE in DXF
-    rect_min_x, rect_min_y, rect_max_x, rect_max_y = get_bbox(vertices)
+    x, y, z, face = panel_coords
 
-    rect_dx = rect_max_x - rect_min_x
-    rect_dy = rect_max_y - rect_min_y
+    # Create the Machining element
+    machining = ET.SubElement(machines_element, 'Machining')
+    machining.set('Type', '2')  # Type 2 is for drilling
+    machining.set('Face', str(face))
 
-    # Calculate groove width from the shorter dimension of the bounding box
-    groove_width = min(rect_dx, rect_dy)
-    half_groove_width = groove_width / 2.0
+    # Parse diameter from layer name (e.g., ABF_D8 means 8mm diameter)
+    try:
+        diameter = float(layer.split('D')[1])
+    except (IndexError, ValueError):
+        print(f"DEBUG: قطر سوراخ از نام لایه {layer} قابل استخراج نیست")
+        diameter = 8.0  # Default diameter if not specified
 
-    # Determine the start and end points of the groove centerline in DXF coordinates
-    start_point_dxf = None
-    end_point_dxf = None
+    # Set attributes
+    machining.set('X', f"{x:.3f}")
+    machining.set('Y', f"{y:.3f}")
+    machining.set('Z', f"{z:.3f}")
+    machining.set('Depth', "16")  # Default depth, can be configured
+    machining.set('Diameter', f"{diameter:.1f}")
 
-    # Use the corners of the bounding box that define the longer side,
-    # but adjust the coordinate perpendicular to the groove direction by half groove width
-    if rect_dy > rect_dx: # Longer dimension is along DXF Y (Groove is vertically oriented in DXF)
-        # Centerline is along DXF X at rect_min_x + half_groove_width
-        # Start and end points are at rect_min_y and rect_max_y
-        start_point_dxf = (rect_min_x + half_groove_width, rect_min_y)
-        end_point_dxf = (rect_min_x + half_groove_width, rect_max_y)
-        print(f"DEBUG:   شیار LWPOLYLINE در DXF عمودی است. نقاط خط مرکزی استفاده شده: ({start_point_dxf[0]:.3f}, {start_point_dxf[1]:.3f}) تا ({end_point_dxf[0]:.3f}, {end_point_dxf[1]:.3f})")
-    else: # Longer dimension is along DXF X (or it's a square) (Groove is horizontally oriented in DXF)
-        # Centerline is along DXF Y at rect_min_y + half_groove_width
-        # Start and end points are at rect_min_x and rect_max_x
-        start_point_dxf = (rect_min_x, rect_min_y + half_groove_width)
-        end_point_dxf = (rect_max_x, rect_min_y + half_groove_width)
-        print(f"DEBUG:   شیار LWPOLYLINE در DXF افقی است. نقاط خط مرکزی استفاده شده: ({start_point_dxf[0]:.3f}, {start_point_dxf[1]:.3f}) تا ({end_point_dxf[0]:.3f}, {end_point_dxf[1]:.3f})")
+def create_pocket_xml(machines_element, entity, panel_length, panel_width, panel_type,
+                     primary_bbox, secondary_bbox, front_bbox, back_bbox, tolerance, config):
+    """
+    Creates an XML element for a pocket operation from a LWPOLYLINE entity.
+    """
+    if not hasattr(entity, 'vertices'):
+        print(f"DEBUG: موجودیت پاکت فاقد نقاط است")
+        return
 
+    vertices = list(entity.vertices())
+    if len(vertices) < 3:
+        print(f"DEBUG: موجودیت پاکت باید حداقل 3 نقطه داشته باشد")
+        return
 
-    if start_point_dxf is None or end_point_dxf is None:
-         print(f"DEBUG:   نمی توان نقاط شروع/پایان شیار را از LWPOLYLINE در لایه {config['groove_layer']} تعیین کرد. رد می شود.")
-         return # Should not happen for a valid rectangle, but as a safeguard
+    # Convert all vertices to panel system
+    panel_points = []
+    face = None
+    
+    for vertex in vertices:
+        coords = convert_coords_to_panel_system(
+            (vertex[0], vertex[1]),
+            panel_type,
+            panel_length,
+            panel_width,
+            primary_bbox,
+            secondary_bbox,
+            front_bbox,
+            back_bbox,
+            tolerance
+        )
+        
+        if not coords:
+            print(f"DEBUG: تبدیل مختصات نقطه پاکت ناموفق بود")
+            return
+            
+        x, y, z, current_face = coords
+        if face is None:
+            face = current_face
+        elif face != current_face:
+            print(f"DEBUG: نقاط پاکت در وجوه مختلف قرار دارند")
+            return
+            
+        panel_points.append((x, y))
 
+    # Create the Machining element
+    machining = ET.SubElement(machines_element, 'Machining')
+    machining.set('Type', '3')  # Type 3 is for pocket
+    machining.set('Face', str(face))
+    machining.set('Depth', "8")  # Default depth for pockets
 
-    # Convert start and end points from DXF (centerline) to XML panel system using the new logic
-    # Pass PANEL bboxes and sheet bboxes for conversion
-    start_x_xml, start_y_xml, face_start = convert_coords_to_panel_system(start_point_dxf[0], start_point_dxf[1], panel_type, panel_length, panel_width, primary_bbox_panel, secondary_bbox_panel, sheet_border_front_bbox, sheet_border_back_bbox, tolerance=1.0)
-    end_x_xml, end_y_xml, face_end = convert_coords_to_panel_system(end_point_dxf[0], end_point_dxf[1], panel_type, panel_length, panel_width, primary_bbox_panel, secondary_bbox_panel, sheet_border_front_bbox, sheet_border_back_bbox, tolerance=1.0)
+    # Create Geometry element and add points
+    geometry = ET.SubElement(machining, 'Geometry')
+    for i, (x, y) in enumerate(panel_points):
+        point = ET.SubElement(geometry, 'Point')
+        point.set('Index', str(i + 1))
+        point.set('X', f"{x:.3f}")
+        point.set('Y', f"{y:.3f}")
 
+def create_groove_xml(machines_element, entity, panel_length, panel_width, panel_type,
+                     primary_bbox, secondary_bbox, front_bbox, back_bbox, tolerance, 
+                     panel_thickness, config):
+    """
+    Creates an XML element for a groove operation from a LWPOLYLINE entity.
+    """
+    if not hasattr(entity, 'vertices'):
+        print(f"DEBUG: موجودیت شیار فاقد نقاط است")
+        return
 
-    if start_x_xml is None or start_y_xml is None or end_x_xml is None or end_y_xml is None or face_start is None or face_end is None:
-        print(f"DEBUG:   تبدیل مختصات برای نقاط شروع/پایان شیار در لایه {config['groove_layer']} ناموفق بود. رد می شود.")
-        # Add more specific debug here to see which point failed conversion
-        # print(f"DEBUG:     Start point DXF: ({start_point_dxf[0]:.3f}, {start_point_dxf[1]:.3f}) -> XML: ({start_x_xml}, {start_y_xml})")
-        # print(f"DEBUG:     End point DXF: ({end_point_dxf[0]:.3f}, {end_point_dxf[1]:.3f}) -> XML: ({end_x_xml}, {end_y_xml})")
-        return # Skip if coordinate conversion failed
+    vertices = list(entity.vertices())
+    if len(vertices) < 2:
+        print(f"DEBUG: موجودیت شیار باید حداقل 2 نقطه داشته باشد")
+        return
 
-    # For grooves, assume a single face for the entire groove.
-    # If start and end points are in different sheet bboxes, this might indicate an issue or a groove spanning faces.
-    # For simplicity, let's assume grooves are entirely on Face 5 or Face 6 based on the start point's sheet bbox.
-    groove_face = face_start # Use the face determined for the start point
+    # Convert all vertices to panel system
+    panel_points = []
+    face = None
+    
+    for vertex in vertices:
+        coords = convert_coords_to_panel_system(
+            (vertex[0], vertex[1]),
+            panel_type,
+            panel_length,
+            panel_width,
+            primary_bbox,
+            secondary_bbox,
+            front_bbox,
+            back_bbox,
+            tolerance
+        )
+        
+        if not coords:
+            print(f"DEBUG: تبدیل مختصات نقطه شیار ناموفق بود")
+            return
+            
+        x, y, z, current_face = coords
+        if face is None:
+            face = current_face
+        elif face != current_face:
+            print(f"DEBUG: نقاط شیار در وجوه مختلف قرار دارند")
+            return
+            
+        panel_points.append((x, y))
 
-    print(f"DEBUG:   شیار (DXF - خط مرکزی): ({start_point_dxf[0]:.3f}, {start_point_dxf[1]:.3f}) تا ({end_point_dxf[0]:.3f}, {end_point_dxf[1]:.3f}) -> تبدیل شده (پنل XML - به سیستم {panel_length:.0f}x{panel_width:.0f}): ({start_x_xml:.3f}, {start_y_xml:.3f}) تا ({end_x_xml:.3f}, {end_y_xml:.3f})")
+    # Create the Machining element
+    machining = ET.SubElement(machines_element, 'Machining')
+    machining.set('Type', '4')  # Type 4 is for groove
+    machining.set('Face', str(face))
+    
+    # Default groove depth is half the panel thickness
+    groove_depth = panel_thickness / 2.0
+    machining.set('Depth', f"{groove_depth:.1f}")
+    
+    # Set default groove width
+    machining.set('Width', "4.0")  # 4mm default width for grooves
 
-
-    # Fixed attributes based on sample XML and layer type
-    groove_type = "4"
-    is_gen_code = "2"
-    # face is determined by sheet bbox now (groove_face)
-    z_height = f"{panel_thickness:.0f}" # Z height often corresponds to material thickness for grooves
-    end_z_height = f"{panel_thickness:.0f}" # EndZ is panel thickness
-    depth = "8" # Fixed depth from sample (This could potentially come from layer name or other DXF attribute)
-    tool_offset = "中" # Fixed from sample
-
-    # Determine Groove width for XML - should be the calculated width
-    xml_groove_width = f"{groove_width:.3f}" # Format as float
-
-    print(f"DEBUG:   در حال ایجاد Machining Type=4 (Groove) در XML برای X={start_x_xml:.3f}, Y={start_y_xml:.3f}, EndX={end_x_xml:.3f}, EndY={end_y_xml:.3f}, Face={groove_face}, Width={xml_groove_width}")
-    ET.SubElement(machines_element, "Machining",
-                  Type=groove_type,
-                  IsGenCode=is_gen_code,
-                  Face=groove_face, # Use the determined face
-                  X=f"{start_x_xml:.3f}",
-                  Y=f"{start_y_xml:.3f}",
-                  Z=z_height,
-                  EndX=f"{end_x_xml:.3f}",
-                  EndY=f"{end_y_xml:.3f}",
-                  EndZ=end_z_height,
-                  Depth=depth,
-                  Width=xml_groove_width, # Use calculated groove width
-                  ToolOffset=tool_offset)
+    # Create Geometry element and add points
+    geometry = ET.SubElement(machining, 'Geometry')
+    for i, (x, y) in enumerate(panel_points):
+        point = ET.SubElement(geometry, 'Point')
+        point.set('Index', str(i + 1))
+        point.set('X', f"{x:.3f}")
+        point.set('Y', f"{y:.3f}")
 
 
 def process_machining_entities_for_panel(doc, panel_element, panel_group_info, panel_length, panel_width, panel_thickness, config):
